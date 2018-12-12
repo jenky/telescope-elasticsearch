@@ -8,13 +8,6 @@ use Jenky\TelescopeElasticsearch\Contracts\Installer;
 class InstallCommand extends Command
 {
     /**
-     * Elasticsearch client.
-     *
-     * @var \Elasticsearch\Client
-     */
-    protected $elastic;
-
-    /**
      * The name and signature of the console command.
      *
      * @var string

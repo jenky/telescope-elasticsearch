@@ -33,7 +33,7 @@ class TelescopeElasticsearchServiceProvider extends ServiceProvider
             $this->app->register(ElasticsearchServiceProvider::class);
         }
 
-        $this->app->when(Contracts\ElasticsearchClient::class)
+        $this->app->when(Storage\ElasticsearchClient::class)
             ->needs('$connection')
             ->give($this->app['config']->get('telescope.storage.elasticsearch.connection'));
 

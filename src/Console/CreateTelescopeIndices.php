@@ -2,15 +2,26 @@
 
 namespace Jenky\TelescopeElasticsearch\Console;
 
-use Elasticsearch\Client;
-use Illuminate\Database\Seeder;
 use Jenky\TelescopeElasticsearch\Contracts\Installer;
-use Jenky\TelescopeElasticsearch\HasElasticsearchClient;
-use Jenky\TelescopeElasticsearch\Contracts\ElasticsearchClient;
+use Jenky\TelescopeElasticsearch\Storage\ElasticsearchClient;
 
-class CreateTelescopeIndices implements Installer, ElasticsearchClient
+class CreateTelescopeIndices implements Installer
 {
-    use HasElasticsearchClient;
+    /**
+     * @var \Jenky\TelescopeElasticsearch\Storage\ElasticsearchClient
+     */
+    protected $elastic;
+
+    /**
+     * Create installer instance.
+     *
+     * @param  \Jenky\TelescopeElasticsearch\Storage\ElasticsearchClient $elastic
+     * @return void
+     */
+    public function __construct(ElasticsearchClient $elastic)
+    {
+        $this->elastic = $elastic;
+    }
 
     /**
      * Install.
