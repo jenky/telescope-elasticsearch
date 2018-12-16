@@ -19,6 +19,12 @@ class ElasticsearchResults
      */
     protected $hits;
 
+    /**
+     * Create elasticsearch result instance.
+     *
+     * @param  array $raw
+     * @return void
+     */
     public function __construct(array $raw = [])
     {
         $this->raw = $raw;

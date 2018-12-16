@@ -7,7 +7,11 @@ use Illuminate\Support\Str;
 use Jenky\TelescopeElasticsearch\HasElasticsearchClient;
 use Laravel\Telescope\Contracts\EntriesRepository;
 use Laravel\Telescope\EntryResult;
+use Laravel\Telescope\EntryType;
 use Laravel\Telescope\Storage\EntryQueryOptions;
+use ONGR\ElasticsearchDSL\Query\Compound\BoolQuery;
+use ONGR\ElasticsearchDSL\Query\FullText\MatchPhraseQuery;
+use ONGR\ElasticsearchDSL\Query\Joining\NestedQuery;
 use ONGR\ElasticsearchDSL\Query\TermLevel\TermQuery;
 use ONGR\ElasticsearchDSL\Search;
 use ONGR\ElasticsearchDSL\Sort\FieldSort;
@@ -66,6 +70,19 @@ class ElasticsearchEntriesRepository implements EntriesRepository
                 $query->addQuery(new TermQuery('family_hash', $options->familyHash));
             }
 
+            if ($options->tag) {
+                $boolQuery = tap(new BoolQuery, function ($query) use ($options) {
+                    $query->add(new MatchPhraseQuery('tags.raw', $options->tag));
+                });
+
+                $nestedQuery = new NestedQuery(
+                    'tags',
+                    $boolQuery
+                );
+
+                $query->addQuery($nestedQuery);
+            }
+
             $query->addSort(new FieldSort('created_at', 'desc'))
                 ->setSize($options->limit);
         });
@@ -79,7 +96,7 @@ class ElasticsearchEntriesRepository implements EntriesRepository
      * @param  \Illuminate\Support\Collection[\Laravel\Telescope\IncomingEntry]  $entries
      * @return void
      */
-    public function store(Collection $entries)
+    public function store(Collection $entries):void
     {
         if ($entries->isEmpty()) {
             return;
@@ -87,7 +104,7 @@ class ElasticsearchEntriesRepository implements EntriesRepository
 
         [$exceptions, $entries] = $entries->partition->isException();
 
-        // $this->storeExceptions($exceptions);
+        $this->storeExceptions($exceptions);
 
         $this->bulkSend($entries);
     }
@@ -98,7 +115,7 @@ class ElasticsearchEntriesRepository implements EntriesRepository
      * @param  \Illuminate\Support\Collection[\Laravel\Telescope\EntryUpdate]  $updates
      * @return void
      */
-    public function update(Collection $updates)
+    public function update(Collection $updates):void
     {
         $entries = [];
 
@@ -130,31 +147,54 @@ class ElasticsearchEntriesRepository implements EntriesRepository
      */
     protected function storeExceptions(Collection $exceptions)
     {
-        $this->table('telescope_entries')->insert($exceptions->map(function ($exception) {
-            $occurrences = $this->table('telescope_entries')
-                    ->where('type', EntryType::EXCEPTION)
-                    ->where('family_hash', $exception->familyHash())
-                    ->count();
+        $entries = collect([]);
 
-            $this->table('telescope_entries')
-                    ->where('type', EntryType::EXCEPTION)
-                    ->where('family_hash', $exception->familyHash())
-                    ->update(['should_display_on_index' => false]);
+        $exceptions->map(function ($exception) use ($entries) {
+            $search = tap(new Search, function ($query) use ($exception) {
+                $query->addQuery(new TermQuery('family_hash', $exception->familyHash()))
+                    ->addQuery(new TermQuery('type', EntryType::EXCEPTION))
+                    ->setSize(1000);
+            });
 
-            return array_merge($exception->toArray(), [
-                'family_hash' => $exception->familyHash(),
-                'content' => json_encode(array_merge(
-                    $exception->content,
-                    ['occurrences' => $occurrences + 1]
-                )),
+            $documents = $this->search($search);
+
+            $occurrences = $documents->map(function ($document) {
+                return tap($this->toIncomingEntry($document), function ($entry) {
+                    $entry->displayOnIndex = false;
+                });
+            });
+
+            $entries->merge($occurrences);
+
+            $content = array_merge(
+                $exception->content,
+                ['occurrences' => $documents->total() + 1]
+            );
+
+            $exception->content = $content;
+
+            $exception->tags([
+                get_class($exception->exception),
             ]);
-        })->toArray());
 
-        $this->storeTags($exceptions->pluck('tags', 'uuid'));
+            $entries->push($exception);
+        });
+
+        $this->bulkSend(collect($entries));
     }
 
-    protected function bulkSend(Collection $entries)
+    /**
+     * Use Elasticsearch bulk API to send list of documents.
+     *
+     * @param  \Illuminate\Support\Collection $entries
+     * @return void
+     */
+    protected function bulkSend(Collection $entries): void
     {
+        if ($entries->isEmpty()) {
+            return;
+        }
+
         $params['body'] = [];
 
         foreach ($entries as $entry) {
@@ -167,7 +207,11 @@ class ElasticsearchEntriesRepository implements EntriesRepository
             ];
 
             $data = $entry->toArray();
+            $data['family_hash'] = $entry->familyHash;
             $data['tags'] = $this->formatTags($entry->tags);
+            $data['should_display_on_index'] = property_exists($entry, 'displayOnIndex')
+                ? $entry->displayOnIndex
+                : false;
 
             $params['body'][] = $data;
         }
@@ -175,19 +219,29 @@ class ElasticsearchEntriesRepository implements EntriesRepository
         $this->elastic->bulk($params);
     }
 
-    protected function formatTags(array $tags)
+    /**
+     * Format tags to elasticsearch input.
+     *
+     * @param  array $tags
+     * @return array
+     */
+    protected function formatTags(array $tags): array
     {
         $formatted = [];
 
         foreach ($tags as $tag) {
             if (Str::contains($tag, ':')) {
                 [$name, $value] = explode(':', $tag);
-                $formatted[] = [
-                    'raw' => $tag,
-                    'name' => $name,
-                    'value' => $value,
-                ];
+            } else {
+                $name = $tag;
+                $value = null;
             }
+
+            $formatted[] = [
+                'raw' => $tag,
+                'name' => $name,
+                'value' => $value,
+            ];
         }
 
         return $formatted;

@@ -37,6 +37,7 @@ class CreateTelescopeIndex extends Migration
                             ],
                             'should_display_on_index' => [
                                 'type' => 'boolean',
+                                'null_value' => true,
                             ],
                             'type' => [
                                 'type' => 'keyword',

@@ -33,10 +33,10 @@ trait HasElasticsearchClient
     public function search(Search $search): ElasticsearchResults
     {
         return ElasticsearchResults::make(
-                $this->elastic->search([
-                    'index' => 'telescope',
-                    'body' => $search->toArray(),
-                ])
+            $this->elastic->search([
+                'index' => 'telescope',
+                'body' => $search->toArray(),
+            ])
         );
     }
 
