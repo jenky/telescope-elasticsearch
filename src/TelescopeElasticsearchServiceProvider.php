@@ -2,9 +2,9 @@
 
 namespace Jenky\TelescopeElasticsearch;
 
-use Illuminate\Support\ServiceProvider;
-use Cviebrock\LaravelElasticsearch\Manager;
 use Cviebrock\LaravelElasticsearch\ServiceProvider as ElasticsearchServiceProvider;
+use Illuminate\Support\ServiceProvider;
+use Laravel\Telescope\Contracts\EntriesRepository;
 
 class TelescopeElasticsearchServiceProvider extends ServiceProvider
 {
@@ -15,7 +15,7 @@ class TelescopeElasticsearchServiceProvider extends ServiceProvider
      */
     public function boot()
     {
-        //
+        $this->registerMigrations();
     }
 
     /**
@@ -25,29 +25,31 @@ class TelescopeElasticsearchServiceProvider extends ServiceProvider
      */
     public function register()
     {
-        if (!$this->shouldRegister()) {
+        if (! $this->usingElasticsearchDriver()) {
             return;
         }
 
-        if (!$this->app->bound(ElasticsearchServiceProvider::class)) {
+        if (! $this->app->bound(ElasticsearchServiceProvider::class)) {
             $this->app->register(ElasticsearchServiceProvider::class);
         }
 
-        $this->app->when(Storage\ElasticsearchClient::class)
-            ->needs('$connection')
-            ->give($this->app['config']->get('telescope.storage.elasticsearch.connection'));
+        // $this->app->when(Storage\ElasticsearchClient::class)
+        //     ->needs('$connection')
+        //     ->give($this->app['config']->get('telescope.storage.elasticsearch.connection'));
 
-        $this->registerInstaller();
         $this->registerStorageDriver();
     }
 
-    protected function registerInstaller()
+    /**
+     * Register the package's migrations.
+     *
+     * @return void
+     */
+    private function registerMigrations()
     {
-        $this->app->singleton(Contracts\Installer::class, Console\CreateTelescopeIndices::class);
-
-        $this->commands([
-            Console\InstallCommand::class,
-        ]);
+        if ($this->app->runningInConsole() && $this->usingElasticsearchDriver()) {
+            $this->loadMigrationsFrom(__DIR__.'/Storage/migrations');
+        }
     }
 
     /**
@@ -57,7 +59,7 @@ class TelescopeElasticsearchServiceProvider extends ServiceProvider
      */
     protected function registerStorageDriver()
     {
-        $this->app->singleton(EntriesRepository::class, ElasticsearchEntriesRepository::class);
+        $this->app->singleton(EntriesRepository::class, Storage\ElasticsearchEntriesRepository::class);
     }
 
     /**
@@ -65,9 +67,8 @@ class TelescopeElasticsearchServiceProvider extends ServiceProvider
      *
      * @return bool
      */
-    protected function shouldRegister()
+    protected function usingElasticsearchDriver()
     {
         return $this->app['config']->get('telescope.driver') == 'elasticsearch';
-        // return true;
     }
 }

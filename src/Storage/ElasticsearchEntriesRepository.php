@@ -3,13 +3,16 @@
 namespace Jenky\TelescopeElasticsearch\Storage;
 
 use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
+use Jenky\TelescopeElasticsearch\HasElasticsearchClient;
+use Laravel\Telescope\Contracts\EntriesRepository;
 use Laravel\Telescope\EntryResult;
 use Laravel\Telescope\Storage\EntryQueryOptions;
-use Laravel\Telescope\Contracts\EntriesRepository;
-use Jenky\TelescopeElasticsearch\HasElasticsearchClient;
-use Jenky\TelescopeElasticsearch\Contracts\ElasticsearchClient;
+use ONGR\ElasticsearchDSL\Query\TermLevel\TermQuery;
+use ONGR\ElasticsearchDSL\Search;
+use ONGR\ElasticsearchDSL\Sort\FieldSort;
 
-class ElasticsearchEntriesRepository implements EntriesRepository, ElasticsearchClient
+class ElasticsearchEntriesRepository implements EntriesRepository
 {
     use HasElasticsearchClient;
 
@@ -28,38 +31,17 @@ class ElasticsearchEntriesRepository implements EntriesRepository, Elasticsearch
      */
     public function find($id) : EntryResult
     {
-        $entry = $this->elastic->search([
-            'index' => 'telescope_entries',
-            'type' => '_doc',
-            'body' => [
-                'query' => [
-                    // 'bool' => [
-                    //     'filter' => [
-                    //         'term' => [
-                    //             ['uuid' => $id],
-                    //         ],
-                    //     ],
-                    // ],
-                    'term' => [
-                        'uuid' => $id,
-                    ],
-                ],
-                'size' => 1,
-            ],
-        ]);
+        $search = tap(new Search, function ($query) use ($id) {
+            $query->addQuery(new TermQuery('uuid', $id));
+        });
 
-        dd($entry);
+        $entry = $this->search($search)->first();
 
-        return new EntryResult(
-            $entry->uuid,
-            null,
-            $entry->batch_id,
-            $entry->type,
-            $entry->family_hash,
-            $entry->content,
-            $entry->created_at,
-            $tags
-        );
+        if (! $entry) {
+            throw new \Exception('Entry not found');
+        }
+
+        return $this->toEntryResult($entry);
     }
 
     /**
@@ -71,58 +53,24 @@ class ElasticsearchEntriesRepository implements EntriesRepository, Elasticsearch
      */
     public function get($type, EntryQueryOptions $options)
     {
-        dd( $this->elastic->search([
-            'index' => 'telescope_entries',
-            'type' => '_doc',
-            'body' => [
-                'query' => [
-                    'bool' => [
-                        // 'must' => [
-                        //     [
-                        //         'query_string' => [
-                        //             'query' => $query,
-                        //         ],
-                        //     ],
-                        // ],
-                        'filter' => [
-                            'term' => array_filter([
-                                ['type' => $type],
-                                ['batch_id' => $options->batchId],
-                                // ['tag' => $options->tag],
-                                ['family_hash' => $options->familyHash],
-                            ]),
-                            'range' => [
-                                [
-                                    'sequence' => [
-                                        'lt' => $options->beforeSequence,
-                                    ]
-                                ],
-                            ],
-                        ],
-                    ],
-                ],
-                'size' => $options->limit,
-                'sort' => [
-                    ['sequence' => 'desc'],
-                ]
-            ],
-        ]) );
-            // ->take($options->limit)
-            // ->orderByDesc('sequence')
-            // ->get()->reject(function ($entry) {
-            //     return ! is_array($entry->content);
-            // })->map(function ($entry) {
-            //     return new EntryResult(
-            //         $entry->uuid,
-            //         $entry->sequence,
-            //         $entry->batch_id,
-            //         $entry->type,
-            //         $entry->family_hash,
-            //         $entry->content,
-            //         $entry->created_at,
-            //         []
-            //     );
-            // })
+        $search = tap(new Search, function ($query) use ($type, $options) {
+            if ($type) {
+                $query->addQuery(new TermQuery('type', $type));
+            }
+
+            if ($options->batchId) {
+                $query->addQuery(new TermQuery('batch_id', $options->batchId));
+            }
+
+            if ($options->familyHash) {
+                $query->addQuery(new TermQuery('family_hash', $options->familyHash));
+            }
+
+            $query->addSort(new FieldSort('created_at', 'desc'))
+                ->setSize($options->limit);
+        });
+
+        return $this->toEntryResults($this->search($search));
     }
 
     /**
@@ -137,37 +85,11 @@ class ElasticsearchEntriesRepository implements EntriesRepository, Elasticsearch
             return;
         }
 
-        // [$exceptions, $entries] = $entries->partition->isException();
+        [$exceptions, $entries] = $entries->partition->isException();
 
-        // // $this->storeExceptions($exceptions);
+        // $this->storeExceptions($exceptions);
 
-        $params['body'] = [];
-
-        $entries->each(function ($entry) use (&$params) {
-            $params['body'][] = [
-                'update' => [
-                    '_index' => 'telescope_entries',
-                    '_type' => '_doc',
-                ],
-            ];
-
-            $params['body'][] = [
-                'doc' => $entry->toArray(),
-                'doc_as_upsert' => true,
-            ];
-        });
-
-        dd($params);
-
-        $this->elastic->bulk($params);
-
-        // $this->table('telescope_entries')->insert($entries->map(function ($entry) {
-        //     $entry->content = json_encode($entry->content);
-
-        //     return $entry->toArray();
-        // })->toArray());
-
-        // $this->storeTags($entries->pluck('tags', 'uuid'));
+        $this->bulkSend($entries);
     }
 
     /**
@@ -178,7 +100,97 @@ class ElasticsearchEntriesRepository implements EntriesRepository, Elasticsearch
      */
     public function update(Collection $updates)
     {
-        //
+        $entries = [];
+
+        foreach ($updates as $update) {
+            $search = tap(new Search, function ($query) use ($update) {
+                $query->addQuery(new TermQuery('uuid', $update->uuid))
+                    ->addQuery(new TermQuery('type', $update->type));
+            });
+
+            $entry = $this->search($search)->first();
+
+            if (! $entry) {
+                continue;
+            }
+
+            $entry['content'] = array_merge($entry['content'], $update->changes);
+
+            $entries[] = $this->toIncomingEntry($entry);
+        }
+
+        $this->bulkSend(collect($entries));
+    }
+
+    /**
+     * Store the given array of exception entries.
+     *
+     * @param  \Illuminate\Support\Collection|\Laravel\Telescope\IncomingEntry[]  $exceptions
+     * @return void
+     */
+    protected function storeExceptions(Collection $exceptions)
+    {
+        $this->table('telescope_entries')->insert($exceptions->map(function ($exception) {
+            $occurrences = $this->table('telescope_entries')
+                    ->where('type', EntryType::EXCEPTION)
+                    ->where('family_hash', $exception->familyHash())
+                    ->count();
+
+            $this->table('telescope_entries')
+                    ->where('type', EntryType::EXCEPTION)
+                    ->where('family_hash', $exception->familyHash())
+                    ->update(['should_display_on_index' => false]);
+
+            return array_merge($exception->toArray(), [
+                'family_hash' => $exception->familyHash(),
+                'content' => json_encode(array_merge(
+                    $exception->content,
+                    ['occurrences' => $occurrences + 1]
+                )),
+            ]);
+        })->toArray());
+
+        $this->storeTags($exceptions->pluck('tags', 'uuid'));
+    }
+
+    protected function bulkSend(Collection $entries)
+    {
+        $params['body'] = [];
+
+        foreach ($entries as $entry) {
+            $params['body'][] = [
+                'index' => [
+                    '_id' => $entry->uuid,
+                    '_index' => 'telescope',
+                    '_type' => '_doc',
+                ],
+            ];
+
+            $data = $entry->toArray();
+            $data['tags'] = $this->formatTags($entry->tags);
+
+            $params['body'][] = $data;
+        }
+
+        $this->elastic->bulk($params);
+    }
+
+    protected function formatTags(array $tags)
+    {
+        $formatted = [];
+
+        foreach ($tags as $tag) {
+            if (Str::contains($tag, ':')) {
+                [$name, $value] = explode(':', $tag);
+                $formatted[] = [
+                    'raw' => $tag,
+                    'name' => $name,
+                    'value' => $value,
+                ];
+            }
+        }
+
+        return $formatted;
     }
 
     /**
