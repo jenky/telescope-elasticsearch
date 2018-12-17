@@ -21,7 +21,8 @@
     "require": {
         "php" : "^7.1",
         "cviebrock/laravel-elasticsearch": "^3.2",
-        "laravel/telescope": "^1.0"
+        "laravel/telescope": "^1.0",
+        "ongr/elasticsearch-dsl": "^6.0"
     },
     "require-dev": {
         "phpunit/phpunit" : ">=5.4.3",
