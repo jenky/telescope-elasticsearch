@@ -2,7 +2,9 @@
 
 namespace Jenky\TelescopeElasticsearch\Storage;
 
+use Carbon\Carbon;
 use DateTimeInterface;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Jenky\TelescopeElasticsearch\HasElasticsearchClient;
@@ -12,6 +14,7 @@ use Laravel\Telescope\Contracts\PrunableRepository;
 use Laravel\Telescope\Contracts\TerminableRepository;
 use Laravel\Telescope\EntryResult;
 use Laravel\Telescope\EntryType;
+use Laravel\Telescope\IncomingEntry;
 use Laravel\Telescope\Storage\EntryQueryOptions;
 use ONGR\ElasticsearchDSL\Query\Compound\BoolQuery;
 use ONGR\ElasticsearchDSL\Query\FullText\MatchPhraseQuery;
@@ -93,7 +96,9 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
                 ->setSize($options->limit);
         });
 
-        return $this->toEntryResults($this->search($search));
+        return $this->toEntryResults($this->search($search))->reject(function ($entry) {
+            return ! is_array($entry->content);
+        });
     }
 
     /**
@@ -137,12 +142,36 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
                 continue;
             }
 
-            $entry['content'] = array_merge($entry['content'], $update->changes);
+            $entry['_source']['content'] = array_merge($entry['_source']['content'] ?? [], $update->changes);
 
-            $entries[] = $this->toIncomingEntry($entry);
+            $entries[] = tap($this->toIncomingEntry($entry), function ($e) use ($update) {
+                $e->tags($this->updateTags($update, $e->tags));
+            });
         }
 
         $this->bulkSend(collect($entries));
+    }
+
+    /**
+     * Update tags of the given entry.
+     *
+     * @param  \Laravel\Telescope\EntryUpdate  $update
+     * @param  array $tags
+     * @return array
+     */
+    protected function updateTags(EntryUpdate $update, array $tags)
+    {
+        if (! empty($update->tagsChanges['added'])) {
+            $tags = array_unique(
+                array_merge($tags, $update->tagsChanges['added'])
+            );
+        }
+
+        if (! empty($update->tagsChanges['removed'])) {
+            Arr::forget($tags, $update->tagsChanges['removed']);
+        }
+
+        return $tags;
     }
 
     /**
@@ -164,21 +193,21 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
 
             $documents = $this->search($search);
 
-            $occurrences = $documents->map(function ($document) {
-                return tap($this->toIncomingEntry($document), function ($entry) {
-                    $entry->displayOnIndex = false;
-                });
-            });
-
-            $entries->merge($occurrences);
-
             $content = array_merge(
                 $exception->content,
                 ['occurrences' => $documents->total() + 1]
             );
 
-            $exception->content = $content;
+            $entries->merge(
+                $documents->map(function ($document) {
+                    return tap($this->toIncomingEntry($document), function ($entry) {
+                        $entry->displayOnIndex = false;
+                    });
+                })
+            );
 
+            $exception->content = $content;
+            $exception->familyHash = $exception->familyHash();
             $exception->tags([
                 get_class($exception->exception),
             ]);
@@ -186,7 +215,7 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
             $entries->push($exception);
         });
 
-        $this->bulkSend(collect($entries));
+        $this->bulkSend($entries);
     }
 
     /**
@@ -251,6 +280,64 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
         }
 
         return $formatted;
+    }
+
+    /**
+     * Map Elasticsearch result to IncomingEntry object.
+     *
+     * @param  array $document
+     * @return \Laravel\Telescope\IncomingEntry
+     */
+    public function toIncomingEntry(array $document): IncomingEntry
+    {
+        $data = $document['_source'] ?? [];
+
+        return tap(IncomingEntry::make($data['content']), function ($entry) use ($data) {
+            $entry->uuid = $data['uuid'];
+            $entry->batchId = $data['batch_id'];
+            $entry->type = $data['type'];
+            $entry->family_hash = $data['family_hash'] ?? null;
+            $entry->recordedAt = Carbon::parse($data['created_at']);
+            $entry->tags = array_pluck($data['tags'], 'raw');
+
+            if (! empty($data['content']['user'])) {
+                $entry->user = $data['content']['user'];
+            }
+        });
+    }
+
+    /**
+     * Map Elasticsearch result to EntryResult object.
+     *
+     * @param  array $document
+     * @return \Laravel\Telescope\EntryResult
+     */
+    public function toEntryResult(array $document): EntryResult
+    {
+        $entry = $document['_source'] ?? [];
+        return new EntryResult(
+            $entry['uuid'],
+            null,
+            $entry['batch_id'],
+            $entry['type'],
+            $entry['family_hash'] ?? null,
+            $entry['content'],
+            Carbon::parse($entry['created_at']),
+            array_pluck($entry['tags'], 'raw')
+        );
+    }
+
+    /**
+     * Map Elasticsearch result to EntryResult collection.
+     *
+     * @param  array $document
+     * @return \Illuminate\Support\Collection
+     */
+    public function toEntryResults($results)
+    {
+        return $results->map(function ($entry) {
+            return $this->toEntryResult($entry);
+        });
     }
 
     /**

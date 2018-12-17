@@ -62,20 +62,9 @@ class TelescopeElasticsearchServiceProvider extends ServiceProvider
      */
     protected function registerStorageDriver()
     {
-        $this->app->singleton(
-            EntriesRepository::class,
-            ElasticsearchEntriesRepository::class
-        );
-
-        $this->app->singleton(
-            ClearableRepository::class,
-            ElasticsearchEntriesRepository::class
-        );
-
-        $this->app->singleton(
-            PrunableRepository::class,
-            ElasticsearchEntriesRepository::class
-        );
+        $this->app->singleton(EntriesRepository::class, ElasticsearchEntriesRepository::class);
+        $this->app->singleton(ClearableRepository::class, ElasticsearchEntriesRepository::class);
+        $this->app->singleton(PrunableRepository::class, ElasticsearchEntriesRepository::class);
     }
 
     /**
