@@ -2,21 +2,27 @@
 
 namespace Jenky\TelescopeElasticsearch\Storage;
 
+use DateTimeInterface;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Jenky\TelescopeElasticsearch\HasElasticsearchClient;
+use Laravel\Telescope\Contracts\ClearableRepository;
 use Laravel\Telescope\Contracts\EntriesRepository;
+use Laravel\Telescope\Contracts\PrunableRepository;
+use Laravel\Telescope\Contracts\TerminableRepository;
 use Laravel\Telescope\EntryResult;
 use Laravel\Telescope\EntryType;
 use Laravel\Telescope\Storage\EntryQueryOptions;
 use ONGR\ElasticsearchDSL\Query\Compound\BoolQuery;
 use ONGR\ElasticsearchDSL\Query\FullText\MatchPhraseQuery;
 use ONGR\ElasticsearchDSL\Query\Joining\NestedQuery;
+use ONGR\ElasticsearchDSL\Query\MatchAllQuery;
+use ONGR\ElasticsearchDSL\Query\TermLevel\RangeQuery;
 use ONGR\ElasticsearchDSL\Query\TermLevel\TermQuery;
 use ONGR\ElasticsearchDSL\Search;
 use ONGR\ElasticsearchDSL\Sort\FieldSort;
 
-class ElasticsearchEntriesRepository implements EntriesRepository
+class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepository, PrunableRepository, TerminableRepository
 {
     use HasElasticsearchClient;
 
@@ -254,7 +260,11 @@ class ElasticsearchEntriesRepository implements EntriesRepository
      */
     public function loadMonitoredTags()
     {
-        //
+        try {
+            $this->monitoredTags = $this->monitoring();
+        } catch (\Throwable $e) {
+            $this->monitoredTags = [];
+        }
     }
 
     /**
@@ -265,7 +275,11 @@ class ElasticsearchEntriesRepository implements EntriesRepository
      */
     public function isMonitoring(array $tags)
     {
-        //
+        if (is_null($this->monitoredTags)) {
+            $this->loadMonitoredTags();
+        }
+
+        return count(array_intersect($tags, $this->monitoredTags)) > 0;
     }
 
     /**
@@ -275,7 +289,7 @@ class ElasticsearchEntriesRepository implements EntriesRepository
      */
     public function monitoring()
     {
-        //
+        return [];
     }
 
     /**
@@ -298,6 +312,39 @@ class ElasticsearchEntriesRepository implements EntriesRepository
     public function stopMonitoring(array $tags)
     {
         //
+    }
+
+    /**
+     * Prune all of the entries older than the given date.
+     *
+     * @param  \DateTimeInterface  $before
+     * @return int
+     */
+    public function prune(DateTimeInterface $before)
+    {
+        $search = tap(new Search, function ($query) use ($before) {
+            $query->addQuery(new RangeQuery('created_at', [
+                'lt' => (string) $before,
+            ]))->addQuery(new MatchAllQuery);
+        });
+
+        $response = $this->elastic->deleteByQuery([
+            'index' => 'telescope',
+            'type' => '_doc',
+            'body' => $search->toArray(),
+        ]);
+
+        return $response['total'] ?? 0;
+    }
+
+    /**
+     * Clear all the entries.
+     *
+     * @return void
+     */
+    public function clear()
+    {
+        $this->elastic->indices()->flush(['index' => 'telescope']);
     }
 
     /**

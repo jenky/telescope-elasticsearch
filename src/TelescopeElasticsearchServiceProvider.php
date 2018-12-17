@@ -4,7 +4,10 @@ namespace Jenky\TelescopeElasticsearch;
 
 use Cviebrock\LaravelElasticsearch\ServiceProvider as ElasticsearchServiceProvider;
 use Illuminate\Support\ServiceProvider;
+use Jenky\TelescopeElasticsearch\Storage\ElasticsearchEntriesRepository;
+use Laravel\Telescope\Contracts\ClearableRepository;
 use Laravel\Telescope\Contracts\EntriesRepository;
+use Laravel\Telescope\Contracts\PrunableRepository;
 
 class TelescopeElasticsearchServiceProvider extends ServiceProvider
 {
@@ -59,7 +62,20 @@ class TelescopeElasticsearchServiceProvider extends ServiceProvider
      */
     protected function registerStorageDriver()
     {
-        $this->app->singleton(EntriesRepository::class, Storage\ElasticsearchEntriesRepository::class);
+        $this->app->singleton(
+            EntriesRepository::class,
+            ElasticsearchEntriesRepository::class
+        );
+
+        $this->app->singleton(
+            ClearableRepository::class,
+            ElasticsearchEntriesRepository::class
+        );
+
+        $this->app->singleton(
+            PrunableRepository::class,
+            ElasticsearchEntriesRepository::class
+        );
     }
 
     /**
