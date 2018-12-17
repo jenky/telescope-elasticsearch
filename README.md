@@ -12,32 +12,43 @@
 This is where your description should go. Try and limit it to a paragraph or two, and maybe throw in a mention of what
 PSRs you support to avoid any confusion with users and contributors.
 
-## Structure
-
-If any of the following are applicable to your project, then the directory structure should follow industry best practices by being named the following.
-
-```
-bin/        
-config/
-src/
-tests/
-vendor/
-```
-
 
 ## Install
 
 Via Composer
 
 ``` bash
-$ composer require jenky/telescope-elasticsearch
+composer require jenky/telescope-elasticsearch
 ```
 
-## Usage
+The package will automatically register itself.
 
-``` php
-$skeleton = new Jenky\TelescopeElasticsearch();
-echo $skeleton->echoPhrase('Hello, League!');
+You can publish the migration with:
+
+```
+php artisan vendor:publish --provider="Jenky\TelescopeElasticsearch\TelescopeElasticsearchServiceProvider"
+```
+
+After you publish the configuration file as suggested above, you may configure ElasticSearch by adding the following to your application's .env file (with appropriate values):
+
+``` ini
+ELASTICSEARCH_HOST=localhost
+ELASTICSEARCH_PORT=9200
+ELASTICSEARCH_SCHEME=http
+ELASTICSEARCH_USER=
+ELASTICSEARCH_PASS=
+```
+
+Run the migration:
+
+```
+php artisan migrate
+```
+
+Then change your Telescope driver to:
+
+``` ini
+TELESCOPE_DRIVER=elasticsearch
 ```
 
 ## Change log
@@ -47,7 +58,7 @@ Please see [CHANGELOG](CHANGELOG.md) for more information on what has changed re
 ## Testing
 
 ``` bash
-$ composer test
+composer test
 ```
 
 ## Contributing
