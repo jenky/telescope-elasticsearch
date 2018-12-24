@@ -5,25 +5,26 @@ namespace Jenky\TelescopeElasticsearch\Storage;
 use Carbon\Carbon;
 use DateTimeInterface;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
-use Jenky\TelescopeElasticsearch\HasElasticsearchClient;
-use Laravel\Telescope\Contracts\ClearableRepository;
+use Laravel\Telescope\EntryType;
+use ONGR\ElasticsearchDSL\Search;
+use Illuminate\Support\Collection;
+use Laravel\Telescope\EntryResult;
+use Laravel\Telescope\IncomingEntry;
+use ONGR\ElasticsearchDSL\Sort\FieldSort;
+use ONGR\ElasticsearchDSL\Query\MatchAllQuery;
+use Laravel\Telescope\Storage\EntryQueryOptions;
 use Laravel\Telescope\Contracts\EntriesRepository;
 use Laravel\Telescope\Contracts\PrunableRepository;
-use Laravel\Telescope\Contracts\TerminableRepository;
-use Laravel\Telescope\EntryResult;
-use Laravel\Telescope\EntryType;
-use Laravel\Telescope\IncomingEntry;
-use Laravel\Telescope\Storage\EntryQueryOptions;
 use ONGR\ElasticsearchDSL\Query\Compound\BoolQuery;
-use ONGR\ElasticsearchDSL\Query\FullText\MatchPhraseQuery;
+use Laravel\Telescope\Contracts\ClearableRepository;
 use ONGR\ElasticsearchDSL\Query\Joining\NestedQuery;
-use ONGR\ElasticsearchDSL\Query\MatchAllQuery;
-use ONGR\ElasticsearchDSL\Query\TermLevel\RangeQuery;
 use ONGR\ElasticsearchDSL\Query\TermLevel\TermQuery;
-use ONGR\ElasticsearchDSL\Search;
-use ONGR\ElasticsearchDSL\Sort\FieldSort;
+use Laravel\Telescope\Contracts\TerminableRepository;
+use ONGR\ElasticsearchDSL\Query\TermLevel\RangeQuery;
+use Jenky\TelescopeElasticsearch\HasElasticsearchClient;
+use ONGR\ElasticsearchDSL\Query\FullText\MatchPhraseQuery;
+use ONGR\ElasticsearchDSL\Query\FullText\QueryStringQuery;
 
 class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepository, PrunableRepository, TerminableRepository
 {
@@ -82,6 +83,9 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
             if ($options->tag) {
                 $boolQuery = tap(new BoolQuery, function ($query) use ($options) {
                     $query->add(new MatchPhraseQuery('tags.raw', $options->tag));
+                    // $query->add(new QueryStringQuery($options->tag, [
+                    //     'fields' => ['tags.raw'],
+                    // ]));
                 });
 
                 $nestedQuery = new NestedQuery(
@@ -246,7 +250,7 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
             $data['tags'] = $this->formatTags($entry->tags);
             $data['should_display_on_index'] = property_exists($entry, 'displayOnIndex')
                 ? $entry->displayOnIndex
-                : false;
+                : true;
 
             $params['body'][] = $data;
         }
@@ -387,6 +391,12 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
      */
     public function monitor(array $tags)
     {
+        $tags = array_diff($tags, $this->monitoring());
+
+        if (empty($tags)) {
+            return;
+        }
+
         //
     }
 
