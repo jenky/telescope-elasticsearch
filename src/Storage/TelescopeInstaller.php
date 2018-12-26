@@ -79,6 +79,7 @@ class TelescopeInstaller implements Installer
                             ],
                             'should_display_on_index' => [
                                 'type' => 'boolean',
+                                'null_value' => true,
                             ],
                             'type' => [
                                 'type' => 'keyword',
@@ -86,6 +87,21 @@ class TelescopeInstaller implements Installer
                             'content' => [
                                 'type' => 'object',
                                 'dynamic' => false,
+                            ],
+                            'tags' => [
+                                'type' => 'nested',
+                                'dynamic' => false,
+                                'properties' => [
+                                    'raw' => [
+                                        'type' => 'keyword',
+                                    ],
+                                    'name' => [
+                                        'type' => 'keyword',
+                                    ],
+                                    'value' => [
+                                        'type' => 'keyword',
+                                    ],
+                                ],
                             ],
                             'created_at' => [
                                 'type' => 'date',
