@@ -5,26 +5,27 @@ namespace Jenky\TelescopeElasticsearch\Storage;
 use Carbon\Carbon;
 use DateTimeInterface;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Str;
-use Laravel\Telescope\EntryType;
-use ONGR\ElasticsearchDSL\Search;
 use Illuminate\Support\Collection;
-use Laravel\Telescope\EntryResult;
-use Laravel\Telescope\IncomingEntry;
-use ONGR\ElasticsearchDSL\Sort\FieldSort;
-use ONGR\ElasticsearchDSL\Query\MatchAllQuery;
-use Laravel\Telescope\Storage\EntryQueryOptions;
+use Illuminate\Support\Str;
+use Jenky\TelescopeElasticsearch\Contracts\Installer;
+use Jenky\TelescopeElasticsearch\HasElasticsearchClient;
+use Laravel\Telescope\Contracts\ClearableRepository;
 use Laravel\Telescope\Contracts\EntriesRepository;
 use Laravel\Telescope\Contracts\PrunableRepository;
-use ONGR\ElasticsearchDSL\Query\Compound\BoolQuery;
-use Laravel\Telescope\Contracts\ClearableRepository;
-use ONGR\ElasticsearchDSL\Query\Joining\NestedQuery;
-use ONGR\ElasticsearchDSL\Query\TermLevel\TermQuery;
 use Laravel\Telescope\Contracts\TerminableRepository;
-use ONGR\ElasticsearchDSL\Query\TermLevel\RangeQuery;
-use Jenky\TelescopeElasticsearch\HasElasticsearchClient;
+use Laravel\Telescope\EntryResult;
+use Laravel\Telescope\EntryType;
+use Laravel\Telescope\IncomingEntry;
+use Laravel\Telescope\Storage\EntryQueryOptions;
+use ONGR\ElasticsearchDSL\Query\Compound\BoolQuery;
 use ONGR\ElasticsearchDSL\Query\FullText\MatchPhraseQuery;
 use ONGR\ElasticsearchDSL\Query\FullText\QueryStringQuery;
+use ONGR\ElasticsearchDSL\Query\Joining\NestedQuery;
+use ONGR\ElasticsearchDSL\Query\MatchAllQuery;
+use ONGR\ElasticsearchDSL\Query\TermLevel\RangeQuery;
+use ONGR\ElasticsearchDSL\Query\TermLevel\TermQuery;
+use ONGR\ElasticsearchDSL\Search;
+use ONGR\ElasticsearchDSL\Sort\FieldSort;
 
 class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepository, PrunableRepository, TerminableRepository
 {
@@ -230,6 +231,13 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
      */
     protected function bulkSend(Collection $entries): void
     {
+        $installer = resolve(Installer::class);
+        $index = $installer->indexName();
+
+        if (! $this->elastic->indices()->exists(compact('index'))) {
+            $installer->install();
+        }
+
         if ($entries->isEmpty()) {
             return;
         }
@@ -240,7 +248,7 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
             $params['body'][] = [
                 'index' => [
                     '_id' => $entry->uuid,
-                    '_index' => 'telescope',
+                    '_index' => $index,
                     '_type' => '_doc',
                 ],
             ];

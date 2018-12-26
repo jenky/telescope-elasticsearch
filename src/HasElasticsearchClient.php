@@ -31,13 +31,14 @@ trait HasElasticsearchClient
      * Use Elasticsearch API to perform search.
      *
      * @param  \ONGR\ElasticsearchDSL\Search $search
+     * @param  string $index
      * @return \Jenky\TelescopeElasticsearch\Storage\ElasticsearchResults
      */
-    public function search(Search $search): ElasticsearchResults
+    public function search(Search $search, $index = '.telescope'): ElasticsearchResults
     {
         return ElasticsearchResults::make(
             $this->elastic->search([
-                'index' => 'telescope',
+                'index' => $index,
                 'body' => $search->toArray(),
             ])
         );
