@@ -254,11 +254,13 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
             ];
 
             $data = $entry->toArray();
+            $data['uuid'] = $data['uuid'];
             $data['family_hash'] = $entry->familyHash;
             $data['tags'] = $this->formatTags($entry->tags);
             $data['should_display_on_index'] = property_exists($entry, 'displayOnIndex')
                 ? $entry->displayOnIndex
                 : true;
+            $data['@timestamp'] = gmdate('c');
 
             $params['body'][] = $data;
         }
@@ -327,6 +329,7 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
     public function toEntryResult(array $document): EntryResult
     {
         $entry = $document['_source'] ?? [];
+
         return new EntryResult(
             $entry['uuid'],
             null,
@@ -434,7 +437,7 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
         });
 
         $response = $this->elastic->deleteByQuery([
-            'index' => 'telescope',
+            'index' => '.telescope',
             'type' => '_doc',
             'body' => $search->toArray(),
         ]);
@@ -449,7 +452,7 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
      */
     public function clear()
     {
-        $this->elastic->indices()->flush(['index' => 'telescope']);
+        $this->elastic->indices()->flush(['index' => '.telescope']);
     }
 
     /**

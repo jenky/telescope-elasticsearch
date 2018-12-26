@@ -68,9 +68,6 @@ class TelescopeInstaller implements Installer
                             'enabled' => true,
                         ],
                         'properties' => [
-                            'sequence' => [
-                                'type' => 'long',
-                            ],
                             'uuid' => [
                                 'type' => 'keyword',
                             ],
@@ -88,10 +85,14 @@ class TelescopeInstaller implements Installer
                             ],
                             'content' => [
                                 'type' => 'object',
+                                'dynamic' => false,
                             ],
                             'created_at' => [
                                 'type' => 'date',
                                 'format' => 'yyyy-MM-dd HH:mm:ss',
+                            ],
+                            '@timestamp' => [
+                                'type' => 'date',
                             ],
                         ],
                     ],
