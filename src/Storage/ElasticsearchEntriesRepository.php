@@ -300,9 +300,16 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
         }
     }
 
+    /**
+     * Map Elasticsearch result to EntryResult object.
+     *
+     * @param  array $document
+     * @return \Laravel\Telescope\EntryResult
+     */
     public function toEntryResult(array $document): EntryResult
     {
         $entry = $document['_source'] ?? [];
+
         return new EntryResult(
             $entry['uuid'],
             null,
@@ -315,6 +322,12 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
         );
     }
 
+    /**
+     * Map Elasticsearch result to EntryResult collection.
+     *
+     * @param  array $document
+     * @return \Illuminate\Support\Collection
+     */
     public function toEntryResults($results)
     {
         return $results->map(function ($entry) {
@@ -322,11 +335,17 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
         });
     }
 
+    /**
+     * Map Elasticsearch result to IncomingEntry object.
+     *
+     * @param  array $document
+     * @return \Laravel\Telescope\IncomingEntry
+     */
     public function toIncomingEntry(array $document): IncomingEntry
     {
         $data = $document['_source'] ?? [];
 
-        return tap(IncomingEntry::make($data['content']), function ($entry) {
+        return tap(IncomingEntry::make($data['content']), function ($entry) use ($data) {
             $entry->uuid = $data['uuid'];
             $entry->batchId = $data['batch_id'];
             $entry->type = $data['type'];
@@ -366,65 +385,6 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
         }
 
         return $formatted;
-    }
-
-    /**
-     * Map Elasticsearch result to IncomingEntry object.
-     *
-     * @param  array $document
-     * @return \Laravel\Telescope\IncomingEntry
-     */
-    public function toIncomingEntry(array $document): IncomingEntry
-    {
-        $data = $document['_source'] ?? [];
-
-        return tap(IncomingEntry::make($data['content']), function ($entry) use ($data) {
-            $entry->uuid = $data['uuid'];
-            $entry->batchId = $data['batch_id'];
-            $entry->type = $data['type'];
-            $entry->family_hash = $data['family_hash'] ?? null;
-            $entry->recordedAt = Carbon::parse($data['created_at']);
-            $entry->tags = array_pluck($data['tags'], 'raw');
-
-            if (! empty($data['content']['user'])) {
-                $entry->user = $data['content']['user'];
-            }
-        });
-    }
-
-    /**
-     * Map Elasticsearch result to EntryResult object.
-     *
-     * @param  array $document
-     * @return \Laravel\Telescope\EntryResult
-     */
-    public function toEntryResult(array $document): EntryResult
-    {
-        $entry = $document['_source'] ?? [];
-
-        return new EntryResult(
-            $entry['uuid'],
-            null,
-            $entry['batch_id'],
-            $entry['type'],
-            $entry['family_hash'] ?? null,
-            $entry['content'],
-            Carbon::parse($entry['created_at']),
-            array_pluck($entry['tags'], 'raw')
-        );
-    }
-
-    /**
-     * Map Elasticsearch result to EntryResult collection.
-     *
-     * @param  array $document
-     * @return \Illuminate\Support\Collection
-     */
-    public function toEntryResults($results)
-    {
-        return $results->map(function ($entry) {
-            return $this->toEntryResult($entry);
-        });
     }
 
     /**

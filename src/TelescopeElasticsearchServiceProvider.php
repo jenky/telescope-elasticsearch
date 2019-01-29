@@ -35,7 +35,7 @@ class TelescopeElasticsearchServiceProvider extends ServiceProvider
         //     ->needs('$connection')
         //     ->give($this->app['config']->get('telescope.storage.elasticsearch.connection'));
 
-        $this->registerIntsaller();
+        // $this->registerIntsaller();
         $this->registerStorageDriver();
     }
 
