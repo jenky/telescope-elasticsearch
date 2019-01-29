@@ -4,11 +4,11 @@ namespace Jenky\TelescopeElasticsearch\Storage;
 
 use Carbon\Carbon;
 use DateTimeInterface;
-use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Jenky\TelescopeElasticsearch\Contracts\Installer;
 use Jenky\TelescopeElasticsearch\HasElasticsearchClient;
+use Jenky\TelescopeElasticsearch\TelescopeIndex;
 use Laravel\Telescope\Contracts\ClearableRepository;
 use Laravel\Telescope\Contracts\EntriesRepository;
 use Laravel\Telescope\Contracts\PrunableRepository;
@@ -29,8 +29,6 @@ use ONGR\ElasticsearchDSL\Sort\FieldSort;
 
 class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepository, PrunableRepository, TerminableRepository
 {
-    use HasElasticsearchClient;
-
     /**
      * The tags currently being monitored.
      *
@@ -46,11 +44,12 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
      */
     public function find($id) : EntryResult
     {
-        $search = tap(new Search, function ($query) use ($id) {
-            $query->addQuery(new TermQuery('uuid', $id));
-        });
+        // $search = tap(new Search, function ($query) use ($id) {
+        //     $query->addQuery(new TermQuery('uuid', $id));
+        // });
 
-        $entry = $this->search($search)->first();
+        // $entry = $this->search($search)->first();
+        $entry = TelescopeIndex::term('uuid', $id)->first();
 
         if (! $entry) {
             throw new \Exception('Entry not found');
@@ -68,40 +67,55 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
      */
     public function get($type, EntryQueryOptions $options)
     {
-        $search = tap(new Search, function ($query) use ($type, $options) {
-            if ($type) {
-                $query->addQuery(new TermQuery('type', $type));
-            }
+        // $search = tap(new Search, function ($query) use ($type, $options) {
+        //     if ($type) {
+        //         $query->addQuery(new TermQuery('type', $type));
+        //     }
 
-            if ($options->batchId) {
-                $query->addQuery(new TermQuery('batch_id', $options->batchId));
-            }
+        //     if ($options->batchId) {
+        //         $query->addQuery(new TermQuery('batch_id', $options->batchId));
+        //     }
 
-            if ($options->familyHash) {
-                $query->addQuery(new TermQuery('family_hash', $options->familyHash));
-            }
+        //     if ($options->familyHash) {
+        //         $query->addQuery(new TermQuery('family_hash', $options->familyHash));
+        //     }
 
-            if ($options->tag) {
-                $boolQuery = tap(new BoolQuery, function ($query) use ($options) {
-                    $query->add(new MatchPhraseQuery('tags.raw', $options->tag));
-                    // $query->add(new QueryStringQuery($options->tag, [
-                    //     'fields' => ['tags.raw'],
-                    // ]));
+        //     if ($options->tag) {
+        //         $boolQuery = tap(new BoolQuery, function ($query) use ($options) {
+        //             $query->add(new MatchPhraseQuery('tags.raw', $options->tag));
+        //         });
+
+        //         $nestedQuery = new NestedQuery(
+        //             'tags',
+        //             $boolQuery
+        //         );
+
+        //         $query->addQuery($nestedQuery);
+        //     }
+
+        //     $query->addSort(new FieldSort('created_at', 'desc'))
+        //         ->setSize($options->limit);
+        // });
+
+        $data = TelescopeIndex::take($options->limit)
+            ->orderBy('created_at', 'desc')
+            ->when($type, function ($query, $value) {
+                $query->term('type', $value);
+            })
+            ->when($options->batchId, function ($query, $value) {
+                $query->term('batch_id', $value);
+            })
+            ->when($options->familyHash, function ($query, $value) {
+                $query->term('family_hash', $value);
+            })
+            ->when($options->tag, function ($query, $value) {
+                $query->nested('tags', function ($q) use ($value) {
+                    $q->match('tags.raw', $value);
                 });
+            })
+            ->get();
 
-                $nestedQuery = new NestedQuery(
-                    'tags',
-                    $boolQuery
-                );
-
-                $query->addQuery($nestedQuery);
-            }
-
-            $query->addSort(new FieldSort('created_at', 'desc'))
-                ->setSize($options->limit);
-        });
-
-        return $this->toEntryResults($this->search($search))->reject(function ($entry) {
+        return $this->toEntryResults($data)->reject(function ($entry) {
             return ! is_array($entry->content);
         });
     }
@@ -190,13 +204,16 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
         $entries = collect([]);
 
         $exceptions->map(function ($exception) use ($entries) {
-            $search = tap(new Search, function ($query) use ($exception) {
-                $query->addQuery(new TermQuery('family_hash', $exception->familyHash()))
-                    ->addQuery(new TermQuery('type', EntryType::EXCEPTION))
-                    ->setSize(1000);
-            });
+            // $search = tap(new Search, function ($query) use ($exception) {
+            //     $query->addQuery(new TermQuery('family_hash', $exception->familyHash()))
+            //         ->addQuery(new TermQuery('type', EntryType::EXCEPTION))
+            //         ->setSize(1000);
+            // });
 
-            $documents = $this->search($search);
+            // $documents = $this->search($search);
+            $documents = TelescopeIndex::term('family_hash', $exception->familyHash())
+                ->term('type', EntryType::EXCEPTION)
+                ->limit(1000);
 
             $content = array_merge(
                 $exception->content,
@@ -218,6 +235,14 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
             ]);
 
             $entries->push($exception);
+
+            $occurrences = $documents->map(function ($document) {
+                return tap($this->toIncomingEntry($document), function ($entry) {
+                    $entry->displayOnIndex = false;
+                });
+            });
+
+            $entries->merge($occurrences);
         });
 
         $this->bulkSend($entries);
@@ -248,7 +273,7 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
             $params['body'][] = [
                 'index' => [
                     '_id' => $entry->uuid,
-                    '_index' => $index,
+                    '_index' => TelescopeIndex::getIndex(),
                     '_type' => '_doc',
                 ],
             ];
@@ -265,7 +290,54 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
             $params['body'][] = $data;
         }
 
-        $this->elastic->bulk($params);
+        TelescopeIndex::getConnection()->bulk($params);
+    }
+
+    protected function initIndex()
+    {
+        if (! TelescopeIndex::exist()) {
+            TelescopeIndex::create();
+        }
+    }
+
+    public function toEntryResult(array $document): EntryResult
+    {
+        $entry = $document['_source'] ?? [];
+        return new EntryResult(
+            $entry['uuid'],
+            null,
+            $entry['batch_id'],
+            $entry['type'],
+            $entry['family_hash'] ?? null,
+            $entry['content'],
+            Carbon::parse($entry['created_at']),
+            array_pluck($entry['tags'], 'raw')
+        );
+    }
+
+    public function toEntryResults($results)
+    {
+        return $results->map(function ($entry) {
+            return $this->toEntryResult($entry);
+        });
+    }
+
+    public function toIncomingEntry(array $document): IncomingEntry
+    {
+        $data = $document['_source'] ?? [];
+
+        return tap(IncomingEntry::make($data['content']), function ($entry) {
+            $entry->uuid = $data['uuid'];
+            $entry->batchId = $data['batch_id'];
+            $entry->type = $data['type'];
+            $entry->family_hash = $data['family_hash'] ?? null;
+            $entry->recordedAt = Carbon::parse($data['created_at']);
+            $entry->tags = array_pluck($data['tags'], 'raw');
+
+            if (! empty($data['content']['user'])) {
+                $entry->user = $data['content']['user'];
+            }
+        });
     }
 
     /**

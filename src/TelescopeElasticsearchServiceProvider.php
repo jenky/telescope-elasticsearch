@@ -2,7 +2,6 @@
 
 namespace Jenky\TelescopeElasticsearch;
 
-use Cviebrock\LaravelElasticsearch\ServiceProvider as ElasticsearchServiceProvider;
 use Illuminate\Support\ServiceProvider;
 use Jenky\TelescopeElasticsearch\Storage\ElasticsearchEntriesRepository;
 use Laravel\Telescope\Contracts\ClearableRepository;
@@ -12,6 +11,16 @@ use Laravel\Telescope\Contracts\PrunableRepository;
 class TelescopeElasticsearchServiceProvider extends ServiceProvider
 {
     /**
+     * Bootstrap any application services.
+     *
+     * @return void
+     */
+    public function boot()
+    {
+        // $this->registerMigrations();
+    }
+
+    /**
      * Register any package services.
      *
      * @return void
@@ -20,10 +29,6 @@ class TelescopeElasticsearchServiceProvider extends ServiceProvider
     {
         if (! $this->usingElasticsearchDriver()) {
             return;
-        }
-
-        if (! $this->app->bound(ElasticsearchServiceProvider::class)) {
-            $this->app->register(ElasticsearchServiceProvider::class);
         }
 
         // $this->app->when(Storage\ElasticsearchClient::class)
