@@ -15,12 +15,6 @@ use Laravel\Telescope\EntryResult;
 use Laravel\Telescope\EntryType;
 use Laravel\Telescope\IncomingEntry;
 use Laravel\Telescope\Storage\EntryQueryOptions;
-use ONGR\ElasticsearchDSL\Query\Compound\BoolQuery;
-use ONGR\ElasticsearchDSL\Query\FullText\MatchPhraseQuery;
-use ONGR\ElasticsearchDSL\Query\Joining\NestedQuery;
-use ONGR\ElasticsearchDSL\Query\TermLevel\TermQuery;
-use ONGR\ElasticsearchDSL\Search;
-use ONGR\ElasticsearchDSL\Sort\FieldSort;
 
 class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepository, PrunableRepository, TerminableRepository
 {
@@ -39,11 +33,6 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
      */
     public function find($id) : EntryResult
     {
-        // $search = tap(new Search, function ($query) use ($id) {
-        //     $query->addQuery(new TermQuery('uuid', $id));
-        // });
-
-        // $entry = $this->search($search)->first();
         $entry = TelescopeIndex::term('uuid', $id)->first();
 
         if (! $entry) {
@@ -62,36 +51,6 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
      */
     public function get($type, EntryQueryOptions $options)
     {
-        // $search = tap(new Search, function ($query) use ($type, $options) {
-        //     if ($type) {
-        //         $query->addQuery(new TermQuery('type', $type));
-        //     }
-
-        //     if ($options->batchId) {
-        //         $query->addQuery(new TermQuery('batch_id', $options->batchId));
-        //     }
-
-        //     if ($options->familyHash) {
-        //         $query->addQuery(new TermQuery('family_hash', $options->familyHash));
-        //     }
-
-        //     if ($options->tag) {
-        //         $boolQuery = tap(new BoolQuery, function ($query) use ($options) {
-        //             $query->add(new MatchPhraseQuery('tags.raw', $options->tag));
-        //         });
-
-        //         $nestedQuery = new NestedQuery(
-        //             'tags',
-        //             $boolQuery
-        //         );
-
-        //         $query->addQuery($nestedQuery);
-        //     }
-
-        //     $query->addSort(new FieldSort('created_at', 'desc'))
-        //         ->setSize($options->limit);
-        // });
-
         $data = TelescopeIndex::take($options->limit)
             ->orderBy('created_at', 'desc')
             ->when($type, function ($query, $value) {
@@ -153,7 +112,10 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
                 continue;
             }
 
-            $entry['_source']['content'] = array_merge($entry['_source']['content'] ?? [], $update->changes);
+            $entry['_source']['content'] = array_merge(
+                $entry['_source']['content'] ?? [],
+                $update->changes
+            );
 
             $entries[] = tap($this->toIncomingEntry($entry), function ($e) use ($update) {
                 $e->tags($this->updateTags($update, $e->tags));
@@ -247,6 +209,7 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
         }
 
         $this->initIndex();
+        $index = TelescopeIndex::make();
 
         $params['body'] = [];
 
@@ -254,8 +217,8 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
             $params['body'][] = [
                 'index' => [
                     '_id' => $entry->uuid,
-                    '_index' => TelescopeIndex::make()->getIndex(),
-                    '_type' => '_doc',
+                    '_index' => $index->getIndex(),
+                    '_type' => $index->getType(),
                 ],
             ];
 
@@ -271,7 +234,7 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
             $params['body'][] = $data;
         }
 
-        TelescopeIndex::make()->getConnection()->bulk($params);
+        $index->getConnection()->bulk($params);
     }
 
     protected function initIndex()
@@ -450,7 +413,6 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
 
         $response = $index->getConnection()->deleteByQuery([
             'index' => '.telescope', // Todo: change hard coded alias
-            'type' => $index->getType(),
             'body' => $query->toDSL(),
         ]);
 

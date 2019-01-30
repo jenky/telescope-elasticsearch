@@ -68,6 +68,9 @@ class TelescopeIndex extends Index
                 'type' => 'date',
                 'format' => 'yyyy-MM-dd HH:mm:ss',
             ],
+            '@timestamp' => [
+                'type' => 'date',
+            ],
         ];
     }
 }
