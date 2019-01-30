@@ -7,7 +7,24 @@ use Jenky\LaravelElasticsearch\Storage\Index;
 class TelescopeIndex extends Index
 {
     /**
-     * {@inheritDoc}
+     * Create new index instance.
+     *
+     * @return void
+     */
+    public function __construct()
+    {
+        $this->setConnection(config('telescope.storage.elasticsearch.connection'));
+    }
+
+    /**
+     * The index name.
+     *
+     * @var string
+     */
+    protected $index = 'telescope';
+
+    /**
+     * {@inheritdoc}
      */
     public function properties(): array
     {

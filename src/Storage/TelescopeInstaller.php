@@ -150,7 +150,7 @@ class TelescopeInstaller implements Installer
      * @param  string $alias
      * @return void
      */
-    protected function updateTelescopeAlias($action, $alias = '.telescope')
+    protected function updateTelescopeAlias($action, $alias = 'telescope')
     {
         $this->elastic->indices()->updateAliases([
             'body' => [

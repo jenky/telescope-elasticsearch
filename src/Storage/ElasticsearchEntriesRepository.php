@@ -6,8 +6,6 @@ use Carbon\Carbon;
 use DateTimeInterface;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
-use Jenky\TelescopeElasticsearch\Contracts\Installer;
-use Jenky\TelescopeElasticsearch\HasElasticsearchClient;
 use Jenky\TelescopeElasticsearch\TelescopeIndex;
 use Laravel\Telescope\Contracts\ClearableRepository;
 use Laravel\Telescope\Contracts\EntriesRepository;
@@ -19,10 +17,7 @@ use Laravel\Telescope\IncomingEntry;
 use Laravel\Telescope\Storage\EntryQueryOptions;
 use ONGR\ElasticsearchDSL\Query\Compound\BoolQuery;
 use ONGR\ElasticsearchDSL\Query\FullText\MatchPhraseQuery;
-use ONGR\ElasticsearchDSL\Query\FullText\QueryStringQuery;
 use ONGR\ElasticsearchDSL\Query\Joining\NestedQuery;
-use ONGR\ElasticsearchDSL\Query\MatchAllQuery;
-use ONGR\ElasticsearchDSL\Query\TermLevel\RangeQuery;
 use ONGR\ElasticsearchDSL\Query\TermLevel\TermQuery;
 use ONGR\ElasticsearchDSL\Search;
 use ONGR\ElasticsearchDSL\Sort\FieldSort;
@@ -110,7 +105,7 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
             })
             ->when($options->tag, function ($query, $value) {
                 $query->nested('tags', function ($q) use ($value) {
-                    $q->match('tags.raw', $value);
+                    $q->matchPhrase('tags.raw', $value);
                 });
             })
             ->get();
@@ -150,12 +145,9 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
         $entries = [];
 
         foreach ($updates as $update) {
-            $search = tap(new Search, function ($query) use ($update) {
-                $query->addQuery(new TermQuery('uuid', $update->uuid))
-                    ->addQuery(new TermQuery('type', $update->type));
-            });
-
-            $entry = $this->search($search)->first();
+            $entry = TelescopeIndex::term('uuid', $update->uuid)
+                ->term('type', $update->type)
+                ->first();
 
             if (! $entry) {
                 continue;
@@ -204,16 +196,10 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
         $entries = collect([]);
 
         $exceptions->map(function ($exception) use ($entries) {
-            // $search = tap(new Search, function ($query) use ($exception) {
-            //     $query->addQuery(new TermQuery('family_hash', $exception->familyHash()))
-            //         ->addQuery(new TermQuery('type', EntryType::EXCEPTION))
-            //         ->setSize(1000);
-            // });
-
-            // $documents = $this->search($search);
             $documents = TelescopeIndex::term('family_hash', $exception->familyHash())
                 ->term('type', EntryType::EXCEPTION)
-                ->limit(1000);
+                ->limit(1000)
+                ->get();
 
             $content = array_merge(
                 $exception->content,
@@ -256,16 +242,11 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
      */
     protected function bulkSend(Collection $entries): void
     {
-        $installer = resolve(Installer::class);
-        $index = $installer->indexName();
-
-        if (! $this->elastic->indices()->exists(compact('index'))) {
-            $installer->install();
-        }
-
         if ($entries->isEmpty()) {
             return;
         }
+
+        $this->initIndex();
 
         $params['body'] = [];
 
@@ -273,7 +254,7 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
             $params['body'][] = [
                 'index' => [
                     '_id' => $entry->uuid,
-                    '_index' => TelescopeIndex::getIndex(),
+                    '_index' => TelescopeIndex::make()->getIndex(),
                     '_type' => '_doc',
                 ],
             ];
@@ -290,12 +271,12 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
             $params['body'][] = $data;
         }
 
-        TelescopeIndex::getConnection()->bulk($params);
+        TelescopeIndex::make()->getConnection()->bulk($params);
     }
 
     protected function initIndex()
     {
-        if (! TelescopeIndex::exist()) {
+        if (! TelescopeIndex::exists()) {
             TelescopeIndex::create();
         }
     }
@@ -462,16 +443,15 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
      */
     public function prune(DateTimeInterface $before)
     {
-        $search = tap(new Search, function ($query) use ($before) {
-            $query->addQuery(new RangeQuery('created_at', [
-                'lt' => (string) $before,
-            ]))->addQuery(new MatchAllQuery);
-        });
+        $query = TelescopeIndex::range('created_at', [
+            'lt' => (string) $before,
+        ])->matchAll();
+        $index = $query->getIndex();
 
-        $response = $this->elastic->deleteByQuery([
-            'index' => '.telescope',
-            'type' => '_doc',
-            'body' => $search->toArray(),
+        $response = $index->getConnection()->deleteByQuery([
+            'index' => '.telescope', // Todo: change hard coded alias
+            'type' => $index->getType(),
+            'body' => $query->toDSL(),
         ]);
 
         return $response['total'] ?? 0;
@@ -484,7 +464,7 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
      */
     public function clear()
     {
-        $this->elastic->indices()->flush(['index' => '.telescope']);
+        TelescopeIndex::flush('.telescope'); // Todo: change hard coded alias
     }
 
     /**
