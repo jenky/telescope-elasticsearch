@@ -6,6 +6,7 @@ use Carbon\Carbon;
 use DateTimeInterface;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
+use Jenky\LaravelElasticsearch\Storage\Index;
 use Jenky\TelescopeElasticsearch\TelescopeIndex;
 use Laravel\Telescope\Contracts\ClearableRepository;
 use Laravel\Telescope\Contracts\EntriesRepository;
@@ -208,8 +209,7 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
             return;
         }
 
-        $this->initIndex();
-        $index = TelescopeIndex::make();
+        $this->initIndex($index = TelescopeIndex::make());
 
         $params['body'] = [];
 
@@ -223,7 +223,6 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
             ];
 
             $data = $entry->toArray();
-            $data['uuid'] = $data['uuid'];
             $data['family_hash'] = $entry->familyHash;
             $data['tags'] = $this->formatTags($entry->tags);
             $data['should_display_on_index'] = property_exists($entry, 'displayOnIndex')
@@ -237,15 +236,21 @@ class ElasticsearchEntriesRepository implements EntriesRepository, ClearableRepo
         $index->getConnection()->bulk($params);
     }
 
-    protected function initIndex()
+    /**
+     * Create new index if not exists.
+     *
+     * @param  \Jenky\LaravelElasticsearch\Storage\Index $index
+     * @return void
+     */
+    protected function initIndex(Index $index)
     {
-        if (! TelescopeIndex::exists()) {
-            TelescopeIndex::create();
+        if (! $index->exists()) {
+            $index->create();
         }
     }
 
     /**
-     * Map Elasticsearch result to EntryResult object.
+     * Map Elasticsearch document to EntryResult object.
      *
      * @param  array $document
      * @return \Laravel\Telescope\EntryResult
